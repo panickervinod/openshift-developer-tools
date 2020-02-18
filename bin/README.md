@@ -30,21 +30,45 @@ All of the scripts will be available on the path and can be run from any directo
 
 These scripts use `sed` and regular expression processing.  The default version of `sed` on MAC does support some of the processing.  Details can be found here; [Differences between sed on Mac OSX and other "standard" sed?](https://unix.stackexchange.com/questions/13711/differences-between-sed-on-mac-osx-and-other-standard-sed)
 
+Update your path to have this repo's bin folder in it.  You may need to alter the paths in the command below to reflect wherever you cloned your fork to.  Append this line to your `~\.bashrc` file:
+
+```
+[[ ":$PATH:" != *"/openshift-developer-tools/bin:"* ]] && export PATH="~/openshift-developer-tools/bin:$PATH"
+```
+
 Please install `gnu-sed`.
 
 Using [Homebrew](https://brew.sh):
 
 ```
-brew install gnu-sed --with-default-names
+brew install gnu-sed
+```
+
+Then update your path and prepend `/usr/local/opt/gnu-sed/libexec/gnubin:` to your existing path so that the system defaults to using `sed` rather than `gsed`.  Append this line to your `~\.bashrc` file:
+
+```
+[[ ":$PATH:" != *"/usr/local/opt/gnu-sed/libexec/gnubin:"* ]] && export PATH="/usr/local/opt/gnu-sed/libexec/gnubin:$PATH"
 ```
 
 Similarly, you must install GNU find:
 
 ```
-brew install findutils --with-default-names
+brew install findutils
 ```
 
-Also make sure `usr/local/bin` is at a higher priority on your **PATH** than `usr/bin`.  This will ensure that packages installed by Homebrew override system binaries; in this case `sed`.
+Then update your path and prepend `/usr/local/opt/findutils/libexec/gnubin:` to your existing path so that the system defaults to using `find` rather than `gfind`.  Append this line to your `~\.bashrc` file:
+
+```
+[[ ":$PATH:" != *"/usr/local/opt/findutils/libexec/gnubin:"* ]] && export PATH="/usr/local/opt/findutils/libexec/gnubin:$PATH"
+```
+
+
+Also make sure `usr/local/bin` is at a higher priority on your **PATH** than `usr/bin`.  You can do this by making sure `usr/local/bin` is to the left of `usr/bin`, preceding it in the **PATH** string.  This will ensure that packages installed by Homebrew override system binaries; in this case `sed`.  Append this line to your `~\.bashrc` file:
+
+```
+[[ ":$PATH:" != *"/usr/local/bin:"* ]] && export PATH="/usr/local/bin:$PATH"
+```
+
 
 `brew doctor` can help diagnose such issues.
 
@@ -67,8 +91,6 @@ $ sudo apt-get install gawk
 $ awk -W version
 GNU Awk 4.2.1, API: 2.0 (GNU MPFR 4.0.2, GNU MP 6.1.2)
 ```
-
-
 
 ## Project Structure
 
@@ -107,8 +129,6 @@ You will need to include a `settings.sh` file in your top level `./openshift` di
 
 At a minimum this file should contain definitions for your `PROJECT_NAMESPACE`, `GIT_URI`, and `GIT_REF` all of which should be setup to be overridable.
 
-*When using the Component Project Structure you will also need to override `PROJECT_OS_DIR`.*  Refer to the Full Component Project Structure Example for details.
-
 **For Example:**
 ```
 export PROJECT_NAMESPACE=${PROJECT_NAMESPACE:-devex-von-permitify}
@@ -139,7 +159,6 @@ export routes="bc-registries worksafe-bc"
 **Full Component Project Structure Example:**
 ```
 export PROJECT_NAMESPACE="devex-von"
-export PROJECT_OS_DIR=${PROJECT_OS_DIR:-../../openshift}
 
 export GIT_URI="https://github.com/bcgov/TheOrgBook.git"
 export GIT_REF="master"
@@ -330,6 +349,27 @@ If you run into certificate errors like `x509: certificate signed by unknown aut
 Following is a list of the top level scripts.  There are additional lower level scripts that are not listed here since they are wrapped into top level scripts.
 
 Use `-h` to get more detailed usage information on the scripts.
+
+## testConnection
+
+A script for testing whether or not one or more host:port combinations are opened or closed.  The script can be used to test connections locally or remotely from within a pod in order to test connectivity from that pod to other services.
+
+Example testing the connectivity from one pod to other pods:
+```
+$ testConnection -f TestConnections.txt -n devex-von-tools -p angular-on-nginx
+
+Reading list of hosts and ports from TestConnections.txt ...
+
+Testing connections from devex-von-tools/angular-on-nginx ...
+google.com:80 - Open
+angular-on-nginx:8080 - Closed
+django:8080 - Open
+postgresql:5432 - Closed
+weasyprint:5001 - Closed
+schema-spy:8080 - Closed
+```
+
+Run `testConnection -h` for additional details.
 
 ## dropAndRecreateDatabase.sh
 

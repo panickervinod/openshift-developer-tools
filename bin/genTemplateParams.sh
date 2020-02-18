@@ -9,46 +9,45 @@ usage() {
   cat <<-EOF
   Tool to generate OpenShift template parameters files in expected places (project or local) for BC Gov applications.
 
-  Usage: ./genParams.sh [ -h -f -l -x -c <component> ]
+  Usage:
+    ${0##*/} [options]
 
-  OPTIONS:
+  Options:
   ========
-    -h prints the usage for the script
     -f force generation even if the file already exists
-    -l generate local params files - with all parameters commented out
-    -c <component> to generate parameters for templates of a specific component
-    -p <profile> load a specific settings profile; setting.<profile>.sh
-    -P Use the default settings profile; settings.sh.  Use this flag to ignore all but the default 
-       settings profile when there is more than one settings profile defined for a project.        
-    -x run the script in debug mode to see what's happening
-
-    Update settings.sh and settings.local.sh files to set defaults
-
 EOF
-exit
 }
+
 # -----------------------------------------------------------------------------------------------------------------
 # Initialization:
 # -----------------------------------------------------------------------------------------------------------------
 
-while getopts p:Pc:flxh FLAG; do
-  case $FLAG in
-    c ) COMP=$OPTARG ;;
-    p ) export PROFILE=$OPTARG ;;
-    P ) export IGNORE_PROFILES=1 ;;    
-    f ) FORCE=1 ;;
-    l ) export APPLY_LOCAL_SETTINGS=1 ;;
-    x ) export DEBUG=1 ;;
-    h ) usage ;;
-    \?) #unrecognized option - show help
-      echo -e \\n"Invalid script option"\\n
-      usage
-      ;;
-  esac
+# =================================================================================================================
+# Process the local command line arguments and pass everything else along.
+# - The 'getopts' options string must start with ':' for this to work.
+# -----------------------------------------------------------------------------------------------------------------
+while [ ${OPTIND} -le $# ]; do
+  if getopts :f FLAG; then
+    case ${FLAG} in
+      # List of local options:
+      f ) FORCE=1 ;;
+      
+      # Pass unrecognized options ...
+      \?) 
+        pass+=" -${OPTARG}"
+        ;;
+    esac
+  else
+    # Pass unrecognized arguments ...
+    pass+=" ${!OPTIND}"
+    let OPTIND++
+  fi
 done
 
-# Shift the parameters in case there any more to be used
+# Pass the unrecognized arguments along for further processing ...
 shift $((OPTIND-1))
+set -- "$@" $(echo -e "${pass}" | sed -e 's/^[[:space:]]*//')
+# =================================================================================================================
 
 if [ -f ${OCTOOLSBIN}/settings.sh ]; then
   . ${OCTOOLSBIN}/settings.sh
@@ -58,17 +57,13 @@ if [ -f ${OCTOOLSBIN}/ocFunctions.inc ]; then
   . ${OCTOOLSBIN}/ocFunctions.inc
 fi
 
-# Debug mode
-if [ ! -z "${DEBUG}" ]; then
-  set -x
-fi
-
 # What types of files to generate - regular+dev/test/prod or local
 if [ ! -z "${APPLY_LOCAL_SETTINGS}" ]; then
   PARM_TYPES="l"
 else
   PARM_TYPES="r d t p"
 fi
+
 # -----------------------------------------------------------------------------------------------------------------
 # Function(s):
 # -----------------------------------------------------------------------------------------------------------------
@@ -147,23 +142,6 @@ getParameterFileCommentFilter () {
   echo "${_commentFilter}"
 }
 
-getParameterFileOutputPrefix () {
-  _type=${1}
-  if [ -z "${_type}" ]; then
-    echo -e \\n"getParameterFileOutputPrefix; Missing parameter!"\\n
-    exit 1
-  fi
-
-  _outputPrefix=${OUTPUTPREFIX}
-  case ${_type} in
-    l ) # Local Files
-      _outputPrefix=${PROJECT_OS_DIR}
-      ;;
-  esac
-
-  echo ${_outputPrefix}
-}
-
 getParameterFileOutputPath () {
   _type=${1}
   _fileName=${2}
@@ -172,8 +150,7 @@ getParameterFileOutputPath () {
     exit 1
   fi
 
-  _outputPrefix=$(getParameterFileOutputPrefix "${_type}")
-  if [ ! -z "${PROFILE}" ]; then
+  if [ ! -z "${PROFILE}" ] && [ "${PROFILE}" != "${_defaultProfileName}" ]; then
     _outputFilename="${_fileName}.${PROFILE}"
   else
     _outputFilename="${_fileName}"
@@ -181,19 +158,19 @@ getParameterFileOutputPath () {
 
   case ${_type} in
     r ) # Regular file
-      _output=${_outputPrefix}$( basename ${_outputFilename}.param )
+      _output=${_outputFilename}.param
       ;;
     d ) # Dev File
-      _output=${_outputPrefix}$( basename ${_outputFilename}.${DEV}.param )
+      _output=${_outputFilename}.${DEV}.param
       ;;
     t ) # Test File
-      _output=${_outputPrefix}$( basename ${_outputFilename}.${TEST}.param )
+      _output=${_outputFilename}.${TEST}.param
       ;;
     p ) # Prod
-      _output=${_outputPrefix}$( basename ${_outputFilename}.${PROD}.param )
+      _output=${_outputFilename}.${PROD}.param
       ;;
     l ) # Local Files
-      _output=${_outputPrefix}/$( basename ${_outputFilename}.local.param )
+      _output=${_outputFilename}.local.param
       ;;
     *) # unrecognized option
       echoError  "\ngetParameterFileOutputPath; Invalid type option.\n"
@@ -293,7 +270,7 @@ generateParameterFile (){
 # Main:
 # -----------------------------------------------------------------------------------------------------------------
 for component in ${components}; do
-  if [ ! -z "${COMP}" ] && [ ! "${COMP}" = ${component} ]; then
+  if [ ! -z "${COMP}" ] && [ ! "${component}" = "." ] && [ ! "${COMP}" = ${component} ]; then
     # Only process named component if -c option specified
     continue
   fi
@@ -302,17 +279,18 @@ for component in ${components}; do
   echo "================================================================================================================="
   echo "Processing templates for ${component}"
   echo "-----------------------------------------------------------------------------------------------------------------"
-  pushd ../${component}/openshift >/dev/null
 
-  # Get list of JSON files - they could be in multiple directories below
-  pushd ${TEMPLATE_DIR} >/dev/null
-  _configTemplates=$(getConfigTemplates)
-  popd >/dev/null
+  _configTemplates=$(getConfigTemplates $(getTemplateDir ${component}))
+  # echo "Configuration templates:"
+  # for configTemplate in ${_configTemplates}; do
+  #   echo ${configTemplate}
+  # done
+  # exit 1
 
   # Iterate through each file and generate the params files
   for file in ${_configTemplates}; do
     # Don't generate dev/test/prod param files for Build templates
-    TEMPLATE=${TEMPLATE_DIR}/${file}
+    TEMPLATE=${file}
     if isBuildConfig ${TEMPLATE}; then
       _isBuildConfig=1
     else
@@ -323,8 +301,13 @@ for component in ${components}; do
       # Don't create environment specific param files for Build Templates
       if ! skipParameterFileGeneration "${type}" "${_isBuildConfig}"; then
         _commentFilter=$(getParameterFileCommentFilter "${type}")
-        _output=$(getParameterFileOutputPath "${type}" "$(getFilenameWithoutExt ${file})")
+        _output=$(getParameterFileOutputPath "${type}" "${file%.*}")
         _parameterFilter=$(generateParameterFilter "${component}" "${type}" "$(getFilenameWithoutExt ${file})")
+        # echoWarning "file: ${file}"
+        # echoWarning "file wo/ext: ${file%.*}"
+        # echoWarning "_output: ${_output}"
+        # echoWarning "_commentFilter: ${_commentFilter}"
+        # echoWarning "_parameterFilter: ${_parameterFilter}"
         generateParameterFile "${component}" "${TEMPLATE}" "${_output}" "${FORCE}" "${_commentFilter}" "${_parameterFilter}"
         exitOnError
       else
@@ -337,7 +320,6 @@ for component in ${components}; do
     done
   done
 
-  popd >/dev/null
   echo "================================================================================================================="
 done
 

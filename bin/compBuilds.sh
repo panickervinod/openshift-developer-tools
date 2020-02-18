@@ -1,13 +1,18 @@
 #!/bin/bash
-
 OCTOOLSBIN=$(dirname $0)
 
+# =================================================================================================================
+# Validation:
+# -----------------------------------------------------------------------------------------------------------------
 _component_name=${1}
 if [ -z "${_component_name}" ]; then
   echo -e \\n"Missing parameter"\\n
   exit 1
 fi
 
+# -----------------------------------------------------------------------------------------------------------------
+# Initialization:
+# -----------------------------------------------------------------------------------------------------------------
 if [ -f ${OCTOOLSBIN}/ocFunctions.inc ]; then
   . ${OCTOOLSBIN}/ocFunctions.inc
 fi
@@ -17,57 +22,64 @@ if [ ! -z "${DEBUG}" ]; then
   set -x
 fi
 
-# Get list of JSON files - could be in multiple directories below
-if [ -d "${TEMPLATE_DIR}" ]; then
-  BUILDS=$(getBuildTemplates ${TEMPLATE_DIR})
-fi
+# -----------------------------------------------------------------------------------------------------------------
+# Functions:
+# -----------------------------------------------------------------------------------------------------------------
+generateBuildConfigs() {
 
-# Switch to Tools Project
-switchProject ${TOOLS}
-exitOnError
+  # Suppress the error message from getBuildTemplates when no search path is returned by getTemplateDir
+  BUILDS=$(getBuildTemplates $(getTemplateDir ${_component_name}) 2>/dev/null || "")
 
-# Local params file path MUST be relative...Hack!
-LOCAL_PARAM_DIR=${PROJECT_OS_DIR}
+  # echo "Build templates:"
+  # for build in ${BUILDS}; do
+  #   echo ${build}
+  # done
+  # exit 1
 
-for build in ${BUILDS}; do
-  echo -e \\n"Processing build configuration; ${build}..."
+  for build in ${BUILDS}; do
+    echo -e \\n"Processing build configuration; ${build}..."
 
-  _template="${build}"
-  _template_basename=$(getFilenameWithoutExt ${build})
-  _buildConfig="${_template_basename}_BuildConfig.json"
+    _template="${build}"
+    _template_basename=$(getFilenameWithoutExt ${build})
+    _buildConfig="${_template_basename}${BUILD_CONFIG_SUFFIX}"
+    _searchPath=$(echo $(getDirectory "${_template}") | sed 's~\(^.*/openshift\).*~\1~')
 
-  if [ ! -z "${PROFILE}" ]; then
-    _paramFileName="${_template_basename}.${PROFILE}"
-  else
-    _paramFileName="${_template_basename}"
-  fi
+    if [ ! -z "${PROFILE}" ] && [ "${PROFILE}" != "${_defaultProfileName}" ]; then
+      _paramFileName="${_template_basename}.${PROFILE}"
+    else
+      _paramFileName="${_template_basename}"
+    fi
 
-  PARAMFILE="${_paramFileName}.param"
-  if [ ! -z "${APPLY_LOCAL_SETTINGS}" ]; then
-    LOCALPARAM="${LOCAL_PARAM_DIR}/${_paramFileName}.local.param"
-  fi
+    PARAMFILE=$(find ${_searchPath} -name "${_paramFileName}.param")
+    if [ ! -z "${APPLY_LOCAL_SETTINGS}" ]; then
+      LOCALPARAM=$(find ${_searchPath} -name "${_paramFileName}.local.param")
+    fi
 
-  if [ -f "${PARAMFILE}" ]; then
-    PARAMFILE="--param-file=${PARAMFILE}"
-  else
-    PARAMFILE=""
-  fi
+    if [ -f "${PARAMFILE}" ]; then
+      PARAMFILE="--param-file=${PARAMFILE}"
+    else
+      PARAMFILE=""
+    fi
 
-  if [ -f "${LOCALPARAM}" ]; then
-    LOCALPARAM="--param-file=${LOCALPARAM}"
-  else
-    LOCALPARAM=""
-  fi
+    if [ -f "${LOCALPARAM}" ]; then
+      LOCALPARAM="--param-file=${LOCALPARAM}"
+    else
+      LOCALPARAM=""
+    fi
 
-  oc process --filename=${_template} ${LOCALPARAM} ${PARAMFILE} > ${_buildConfig}
-  exitOnError
-  if [ -z ${GEN_ONLY} ]; then
-    oc ${OC_ACTION} -f ${_buildConfig}
+    oc process  --local --filename=${_template} ${LOCALPARAM} ${PARAMFILE} > ${_buildConfig}
     exitOnError
-  fi
+  done
+}
+# =================================================================================================================
 
-  # Delete the tempfile if the keep command line option was not specified
-  if [ -z "${KEEPJSON}" ]; then
-    rm ${_buildConfig}
-  fi
-done
+# =================================================================================================================
+# Main Script:
+# -----------------------------------------------------------------------------------------------------------------
+generateBuildConfigs
+
+if [ -z ${GEN_ONLY} ]; then
+  echo -e \\n"Deploying build configuration files ..."
+  deployBuildConfigs
+fi
+# =================================================================================================================
